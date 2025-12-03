@@ -1,0 +1,1708 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>内存内部探秘 - 3D可视化学习</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/aos@2.3.1/dist/aos.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg: linear-gradient(135deg, #0a1428, #1a2b4a);
+            --primary: #00ff88;
+            --secondary: #4dabf7;
+            --accent: #ff6b35;
+            --text: #e8f4fd;
+            --card: rgba(255,255,255,0.1);
+            --glow: 0 0 20px rgba(0, 255, 136, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 60px 0;
+            background: linear-gradient(45deg, rgba(0, 255, 136, 0.1), rgba(77, 171, 247, 0.1));
+            border-radius: 20px;
+            margin-bottom: 40px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(0, 255, 136, 0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .header h1 {
+            font-family: 'Orbitron', monospace;
+            font-size: 3.5rem;
+            font-weight: 900;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 20px;
+            text-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+            position: relative;
+            z-index: 1;
+        }
+
+        .header p {
+            font-size: 1.3rem;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* --- 新增：Three.js 容器样式 --- */
+        #canvas-container {
+            width: 100%;
+            height: 500px;
+            background: rgba(0,0,0,0.2); /* 半透明黑，融合背景 */
+            border-radius: 20px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+        }
+        
+        .overlay-ui {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 10;
+        }
+
+        .control-btn {
+            background: rgba(10, 20, 40, 0.8);
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-btn:hover {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 0 20px var(--primary);
+        }
+        
+        .control-btn.active {
+            background: var(--secondary);
+            border-color: var(--secondary);
+            color: #fff;
+        }
+
+        /* 内存条细节 */
+        .memory-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .detail-card {
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .detail-card:hover {
+            transform: translateY(-10px);
+            box-shadow: var(--glow);
+            border-color: var(--primary);
+        }
+
+        .detail-card i {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .detail-card h3 {
+            font-family: 'Orbitron', monospace;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        /* 数据存储动画 */
+        .data-storage {
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin: 40px 0;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .memory-cells {
+            display: grid;
+            grid-template-columns: repeat(16, 40px);
+            gap: 10px;
+            margin: 30px 0;
+            justify-content: center;
+        }
+
+        .cell {
+            width: 40px;
+            height: 40px;
+            border: 2px solid var(--primary);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Orbitron', monospace;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .cell:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 15px var(--primary);
+        }
+
+        .cell.on {
+            background: var(--primary);
+            color: #000;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* 性能参数 */
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            margin: 40px 0;
+        }
+
+        .perf-card {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(77, 171, 247, 0.1));
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .perf-value {
+            font-family: 'Orbitron', monospace;
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary);
+            display: block;
+        }
+
+        /* DDR对比 */
+        .ddr-comparison {
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin: 40px 0;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .ddr-pairs {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 50px;
+            margin: 30px 0;
+        }
+
+        .ddr-card {
+            flex: 1;
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(255, 107, 53, 0.1));
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            border: 2px solid var(--accent);
+        }
+
+        .ddr4 { border-color: #00ff88; }
+        .ddr5 { border-color: #ff6b35; }
+
+        /* 参数调整区域 */
+        .parameter-control {
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin: 40px 0;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .control-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-top: 30px;
+        }
+
+        .slider-group {
+            margin-bottom: 30px;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-family: 'Orbitron', monospace;
+        }
+
+        .slider-value {
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.7);
+        }
+
+        .performance-metrics {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(0, 255, 136, 0.2);
+        }
+
+        .metric-bar-container {
+            margin-bottom: 25px;
+        }
+
+        .metric-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .metric-bar {
+            height: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .metric-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .chart-container {
+            margin-top: 30px;
+            height: 300px;
+        }
+
+        /* 知识卡片 */
+        .info-card {
+            position: absolute;
+            background: rgba(10, 20, 40, 0.95);
+            border: 1px solid var(--primary);
+            border-radius: 10px;
+            padding: 15px;
+            width: 300px;
+            box-shadow: var(--glow);
+            z-index: 100;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .info-card h4 {
+            color: var(--primary);
+            margin-bottom: 8px;
+            font-family: 'Orbitron', monospace;
+        }
+
+        .info-card p {
+            font-size: 0.95rem;
+            opacity: 0.9;
+        }
+
+        .info-card::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: rgba(10, 20, 40, 0.95);
+            border-left: 1px solid var(--primary);
+            border-bottom: 1px solid var(--primary);
+            transform: rotate(45deg);
+            bottom: -7px;
+            left: 20px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .header h1 { font-size: 2rem; } /* Smaller font on mobile */
+            .memory-details { grid-template-columns: 1fr; }
+            .ddr-pairs { flex-direction: column; }
+            .memory-cells { grid-template-columns: repeat(8, 30px); }
+            .control-container { grid-template-columns: 1fr; }
+            
+            #canvas-container { height: 300px; } /* Smaller canvas */
+            .overlay-ui { width: 100%; flex-wrap: wrap; justify-content: center; bottom: 10px; }
+            .control-btn { font-size: 0.8rem; padding: 8px 15px; margin-bottom: 5px; } /* Stack buttons if needed */
+            
+            .scene-stage { padding: 0 10px 20px 10px; } /* Less padding */
+            .hdd-warehouse, .ram-desk { width: 40%; } /* Adjust widths */
+            
+            .anatomy-stage { transform: scale(0.7); height: 300px; } /* Scale down anatomy */
+            .layer-part { width: 300px; }
+            .layer-fingers { width: 300px; }
+            
+            .motherboard-socket { width: 100%; max-width: 300px; } /* Responsive socket */
+            .parts-bin { gap: 15px; }
+        }
+
+        /* 图片样式 */
+        .responsive-img {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border-radius: 10px;
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+            margin: 20px auto;
+            display: block;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0, 255, 136, 0.1); }
+        ::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 4px; }
+
+        /* --- 新增：DRAM 微观模拟样式 --- */
+        .micro-lab-container {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 40px;
+            background: rgba(0,0,0,0.2); border-radius: 15px; padding: 30px;
+            border: 1px solid rgba(77, 171, 247, 0.3); margin-top: 30px;
+        }
+        .cap-visual-wrapper {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            border-right: 1px dashed rgba(255,255,255,0.1); padding-right: 20px;
+        }
+        /* 电容杯子 */
+        .capacitor-cup {
+            width: 120px; height: 180px;
+            border: 4px solid #555; border-top: none; border-radius: 0 0 15px 15px;
+            position: relative; background: rgba(255,255,255,0.02); overflow: hidden;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        }
+        /* 电荷液体 */
+        .charge-liquid {
+            position: absolute; bottom: 0; width: 100%; height: 0%;
+            background: linear-gradient(0deg, var(--primary) 0%, var(--secondary) 100%);
+            transition: height 0.1s linear, background 0.3s;
+            box-shadow: 0 0 20px var(--primary);
+        }
+        /* 液体波纹 */
+        .charge-liquid::before {
+            content: ''; position: absolute; width: 200%; height: 20px; top: -10px; left: -50%;
+            background: rgba(255,255,255,0.3); border-radius: 40%;
+            animation: wave 2s infinite linear;
+        }
+        @keyframes wave { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .cap-info-wrapper {
+            display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+        }
+        .bit-display {
+            font-family: 'Orbitron', monospace; font-size: 4rem; font-weight: 900;
+            padding: 10px 40px; border: 2px solid var(--primary); border-radius: 10px;
+            margin-bottom: 10px; background: #000; color: var(--primary);
+            text-shadow: 0 0 20px var(--primary);
+        }
+        .voltage-text { font-family: monospace; color: var(--secondary); margin-top: 10px; font-size: 1.2rem; }
+
+        @media (max-width: 768px) {
+            .micro-lab-container { grid-template-columns: 1fr; border: none; padding: 0; }
+            .cap-visual-wrapper { border-right: none; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 20px; margin-bottom: 20px; }
+        }
+
+        /* --- Concept Awareness (Robot) --- */
+        .concept-container {
+            position: relative; height: 500px; background: rgba(0,0,0,0.3);
+            border-radius: 20px; overflow: hidden; margin: 40px 0;
+            border: 1px solid rgba(77, 171, 247, 0.3);
+        }
+        .scene-stage {
+            display: flex; justify-content: space-between; height: 100%; align-items: flex-end; padding: 0 40px 40px 40px;
+        }
+        .hdd-warehouse {
+            width: 30%; height: 250px; background: #3e2723; border: 4px solid #281916;
+            border-radius: 8px; position: relative; display: flex; flex-wrap: wrap;
+            align-content: flex-end; padding: 10px; gap: 5px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        .ram-desk {
+            width: 30%; height: 150px; background: #37474f; border-top: 8px solid #546e7a;
+            border-radius: 8px 8px 0 0; position: relative; display: flex; justify-content: center;
+        }
+        .robot-actor {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            transition: all 0.5s ease; display: flex; flex-direction: column; align-items: center; z-index: 10;
+        }
+        .robot-actor i { font-size: 4rem; color: #e0e0e0; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .robot-actor.fetching { left: 15%; transition: left 2s ease-in-out; }
+        .robot-actor.returning { left: 85%; transition: left 2s ease-in-out; }
+        .robot-actor.reading { left: 85%; }
+        .robot-actor.fast-reading { left: 85%; transform: translateX(-50%) scale(1.2); }
+        
+        .book-item { width: 10px; height: 40px; background: #1e88e5; border: 1px solid #bbdefb; }
+        .book-target { background: #f44336 !important; border-color: #ffcdd2 !important; }
+
+        /* --- Hardware Anatomy --- */
+        .anatomy-stage {
+            height: 400px; perspective: 1000px; display: flex; justify-content: center; align-items: center;
+            margin: 40px 0; position: relative;
+        }
+        .layer-part {
+            position: absolute; width: 400px; height: 60px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; border-radius: 5px; cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s;
+            transform-style: preserve-3d;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .layer-heatsink { background: linear-gradient(90deg, #d32f2f, #7b1fa2); border: 1px solid #ff5252; z-index: 5; color: white; text-shadow: 0 0 5px black; }
+        .layer-chips { background: transparent; z-index: 4; justify-content: space-around; padding: 0 20px; pointer-events: none; box-shadow: none; }
+        .chip-unit { width: 30px; height: 30px; background: #111; border: 1px solid #444; pointer-events: auto; cursor: pointer; }
+        .chip-unit:hover { background: #333; }
+        .layer-pcb { background: #1b5e20; border: 1px solid #2e7d32; z-index: 3; color: rgba(255,255,255,0.5); font-family: monospace; }
+        .layer-fingers { height: 20px; z-index: 2; display: flex; width: 400px; background: transparent; box-shadow: none; }
+        .finger-segment { background: linear-gradient(180deg, #ffb300, #ff6f00); height: 100%; width: 100%; border-radius: 0 0 5px 5px; }
+
+        /* --- Simulation Bench --- */
+        .install-lab {
+            background: rgba(0,0,0,0.2); padding: 30px; border-radius: 20px;
+            border: 1px solid rgba(255, 107, 53, 0.3);
+            margin: 40px 0;
+        }
+        .motherboard-socket {
+            width: 300px; height: 300px; background: #263238; border: 4px solid #37474f;
+            border-radius: 10px; margin: 0 auto 30px; padding: 20px; position: relative;
+            display: flex; flex-direction: column; align-items: center;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        }
+        .ram-slots-container { display: flex; gap: 10px; margin-top: 20px; }
+        .ram-slot {
+            width: 30px; height: 160px; background: #455a64; border: 2px solid #546e7a;
+            border-radius: 4px; position: relative; transition: all 0.3s;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .ram-slot.filled { background: #000; border-color: var(--primary); }
+        .ram-slot.drag-over { border-color: #ffeb3b; box-shadow: 0 0 15px #ffeb3b; }
+        .parts-bin {
+            display: flex; gap: 30px; justify-content: center; padding: 20px;
+            background: rgba(0,0,0,0.3); border-radius: 10px; flex-wrap: wrap;
+        }
+        .draggable-ram {
+            cursor: grab; transition: transform 0.2s; display: flex; flex-direction: column; align-items: center;
+        }
+        .draggable-ram:active { cursor: grabbing; }
+        .draggable-ram:hover { transform: scale(1.1); }
+        .ram-stick-icon { width: 30px; height: 120px; border-radius: 4px; margin-bottom: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Bar -->
+        <nav style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: rgba(10, 20, 40, 0.8); backdrop-filter: blur(10px); border-radius: 15px; margin-bottom: 20px; border: 1px solid rgba(0, 255, 136, 0.2);">
+            <div style="font-family: 'Orbitron', monospace; font-weight: bold; color: var(--primary); font-size: 1.2rem;">
+                <i class="fas fa-memory"></i> 内存实验室
+            </div>
+            <a href="cpu_learning_kit.html" style="text-decoration: none; color: var(--secondary); font-weight: bold; padding: 8px 16px; border: 1px solid var(--secondary); border-radius: 20px; transition: all 0.3s;">
+                <i class="fas fa-microchip"></i> 去学CPU
+            </a>
+        <a href="kejian.html"
+   style="text-decoration: none; color: var(--secondary); font-weight: bold; padding: 8px 16px; border: 1px solid var(--secondary); border-radius: 20px; transition: all 0.3s;">
+    <i class="fas fa-file-powerpoint"></i> 课件
+</a>
+        </nav>
+
+        <header class="header" data-aos="fade-down">
+            <h1 class="animate__animated animate__fadeInDown">内存内部探秘</h1>
+            <p><i class="fas fa-microchip"></i> 深入探索计算机内存的奥秘世界</p>
+        </header>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 40px 0;">
+                <i class="fas fa-brain"></i> 什么是内存？
+            </h2>
+            
+            <div class="memory-details">
+                <div class="detail-card" data-aos="zoom-in" data-aos-delay="100">
+                    <i class="fas fa-lightbulb"></i>
+                    <h3>临时存储</h3>
+                    <p>CPU处理数据时的临时存放空间<br>断电后数据立即消失</p>
+                </div>
+                
+                <div class="detail-card" data-aos="zoom-in" data-aos-delay="200">
+                    <i class="fas fa-bolt"></i>
+                    <h3>快速访问</h3>
+                    <p>比硬盘快10万倍<br>数据读写速度接近光速</p>
+                </div>
+                
+                <div class="detail-card" data-aos="zoom-in" data-aos-delay="300">
+                    <i class="fas fa-layer-group"></i>
+                    <h3>层次结构</h3>
+                    <p>介于CPU寄存器和硬盘之间<br>容量和速度的完美平衡</p>
+                </div>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--secondary); margin: 40px 0;">
+                <i class="fas fa-brain"></i> 概念认知：为什么要用内存？
+            </h2>
+            
+            <div class="concept-container">
+                <div class="scene-stage">
+                    <!-- HDD Warehouse -->
+                    <div class="hdd-warehouse">
+                        <span style="position: absolute; top: -50px; width: 100%; text-align: center; color: #d7ccc8; font-weight: bold;">硬盘 (HDD/SSD) <br><span style="font-size:0.8rem; font-weight:normal;">大仓库：容量大，速度慢</span></span>
+                        <!-- Books -->
+                        <div class="book-item"></div><div class="book-item"></div><div class="book-item"></div>
+                        <div class="book-item"></div><div class="book-item book-target" id="target-book"></div><div class="book-item"></div>
+                        <div class="book-item"></div><div class="book-item"></div><div class="book-item"></div>
+                        <div class="book-item"></div><div class="book-item"></div><div class="book-item"></div>
+                    </div>
+
+                    <!-- Robot -->
+                    <div class="robot-actor" id="robot-actor">
+                        <i class="fas fa-robot"></i>
+                        <span style="background: #000; padding: 2px 5px; border-radius: 4px; font-size: 0.8rem; margin-top: 5px;">CPU 机器人</span>
+                        <div id="robot-book" class="book-item book-target" style="display: none; margin-top: -40px; margin-left: 40px; transform: rotate(15deg);"></div>
+                    </div>
+
+                    <!-- RAM Desk -->
+                    <div class="ram-desk">
+                        <span style="position: absolute; top: -50px; width: 100%; text-align: center; color: var(--primary); font-weight: bold;">内存 (RAM) <br><span style="font-size:0.8rem; font-weight:normal;">书桌：速度快，空间小</span></span>
+                        <div id="desk-book" class="book-item book-target" style="display: none; margin-top: -20px; transform: rotate(-10deg);"></div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px; text-align: center; width: 80%;">
+                    <p id="concept-message" style="color: #ffeb3b; margin-bottom: 10px; font-family: monospace;">硬盘就像大仓库，内存就像你的书桌。</p>
+                    <button class="control-btn" onclick="startConceptDemo('slow')" style="display: inline-flex; margin: 0 10px;">
+                        <i class="fas fa-search"></i> 1. 从硬盘查找 (慢)
+                    </button>
+                    <button class="control-btn" onclick="startConceptDemo('fast')" style="display: inline-flex; margin: 0 10px;">
+                        <i class="fas fa-bolt"></i> 2. 从内存读取 (快)
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 40px 0;">
+                <i class="fas fa-cube"></i> 宏观物理结构 (3D View)
+            </h2>
+            <p style="text-align:center; color:#94a3b8; margin-bottom:20px;">
+                拖拽旋转查看结构 | 滚轮缩放 | 点击按钮交互
+            </p>
+            
+            <div id="canvas-container">
+                <div class="overlay-ui">
+                    <button class="control-btn" onclick="toggleRotation3D()">
+                        <i class="fas fa-pause" id="icon-pause"></i> 旋转/暂停
+                    </button>
+                    <button class="control-btn" onclick="toggleDataFlow()">
+                        <i class="fas fa-bolt"></i> 模拟数据传输
+                    </button>
+                    <button class="control-btn" onclick="toggleDDR()">
+                        <i class="fas fa-exchange-alt"></i> 切换 DDR4/DDR5
+                    </button>
+                </div>
+                <div style="position: absolute; top: 15px; left: 15px; color: var(--primary); font-family: 'Orbitron'; font-size: 0.9rem; pointer-events: none;">
+                    当前展示：<span id="model-label">标准 DDR4 内存条</span>
+                </div>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--accent); margin: 40px 0;">
+                <i class="fas fa-microchip"></i> 硬件解剖室
+            </h2>
+            <p style="text-align: center; margin-bottom: 20px;">拖动滑块拆解内存条，点击部件查看详情</p>
+            
+            <div class="anatomy-stage">
+                <!-- Heatsink -->
+                <div class="layer-part layer-heatsink" id="layer-heatsink" onclick="showAnatomyInfo('heatsink')">
+                    <span>散热马甲 (Heatsink)</span>
+                </div>
+                <!-- Chips -->
+                <div class="layer-part layer-chips" id="layer-chips">
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                    <div class="chip-unit" onclick="showAnatomyInfo('chips')"></div>
+                </div>
+                <!-- PCB -->
+                <div class="layer-part layer-pcb" id="layer-pcb" onclick="showAnatomyInfo('pcb')">
+                    <span>PCB Circuit Board</span>
+                </div>
+                <!-- Fingers -->
+                <div class="layer-part layer-fingers" id="layer-fingers" onclick="showAnatomyInfo('fingers')">
+                    <div class="finger-segment"></div>
+                    <div style="width: 20px;"></div> <!-- Notch -->
+                    <div class="finger-segment"></div>
+                </div>
+            </div>
+
+            <div class="slider-group" style="max-width: 400px; margin: 0 auto;">
+                <div class="slider-label">
+                    <span>拆解程度</span>
+                    <span class="slider-value" id="explode-value">0%</span>
+                </div>
+                <input type="range" id="explode-slider" min="0" max="100" value="0" oninput="updateExplode(this.value)">
+            </div>
+        </section>
+
+        <section class="data-storage" data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 30px 0;">
+                <i class="fas fa-database"></i> 数据存储原理
+            </h2>
+            
+            <p style="text-align: center; font-size: 1.2rem; margin-bottom: 30px;">
+                每个内存单元就像一个微型开关，通过电信号存储0和1
+            </p>
+            
+            <img src="https://kkimgs.yisou.com/ims?kt=url&at=smstruct&key=aHR0cHM6Ly9pbWcubXAuc29odS5jb20vdXBsb2FkLzIwMTcwODE2LzlkMWI4YWJjZjY2ZDQwZjc5NzQ0YWQyZTcyYmZiYmI4X3RoLnBuZw==&sign=yx:P0q1DxVoBcdq_IPuKHXyQ-sDciU=&tv=400_400" alt="内存芯片特写展示内部电路结构" class="responsive-img" data-aos="zoom-in">
+            
+            <div class="micro-lab-container">
+                <div class="cap-visual-wrapper">
+                    <h3 style="color:var(--secondary); margin-bottom:15px;"><i class="fas fa-microscope"></i> 微观：单个存储单元 (Bit)</h3>
+                    <div class="capacitor-cup">
+                        <div id="dram-liquid" class="charge-liquid"></div>
+                    </div>
+                    <div class="voltage-text">电容电压: <span id="dram-voltage">0.00V</span></div>
+                    <p style="font-size:0.8rem; color:#94a3b8; margin-top:5px;">(电荷会随时间自然流失)</p>
+                </div>
+
+                <div class="cap-info-wrapper">
+                    <p style="margin-bottom: 10px; color: #ccc;">CPU 读取到的信号</p>
+                    <div id="dram-bit" class="bit-display">0</div>
+                    <p id="dram-status" style="color: var(--danger); font-weight: bold; margin-bottom: 20px;">数据丢失 (电荷不足)</p>
+                    
+                    <button class="control-btn" style="padding: 15px 30px; font-size: 1.1rem;" onclick="chargeDRAM()">
+                        <i class="fas fa-sync-alt"></i> 写入/刷新数据 "1"
+                    </button>
+                    <div style="text-align: left; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 0.9rem;">
+                        <strong>💡 知识点：</strong>
+                        <ul style="margin-left: 20px; margin-top: 5px; color: #94a3b8;">
+                            <li><strong>充电 (Write 1):</strong> 向电容注入电子，代表二进制 1。</li>
+                            <li><strong>漏电 (Leakage):</strong> 物理特性导致电荷流失。</li>
+                            <li><strong>刷新 (Refresh):</strong> 电脑必须每 64ms 重新读取并充电一次，否则数据消失。这就是为什么内存断电会丢数据！</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 40px;">
+                <h3 style="text-align: center; color: var(--primary); margin-bottom: 20px;">
+                    <i class="fas fa-microchip"></i> 内存单元阵列
+                </h3>
+                <div class="memory-cells">
+                
+                </div>
+                <p style="text-align: center; opacity: 0.8;">
+                    点击单元格来模拟数据写入过程
+                </p>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: #ff9800; margin: 40px 0;">
+                <i class="fas fa-tools"></i> 模拟装机台
+            </h2>
+            
+            <div class="install-lab">
+                <div id="install-feedback" style="text-align: center; margin-bottom: 20px; padding: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; color: #fff;">
+                    任务：请为这台电脑安装双通道内存（2根 DDR4）。
+                </div>
+
+                <div class="motherboard-socket">
+                    <div style="width: 100px; height: 100px; background: #bdbdbd; border: 2px solid #9e9e9e; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+                        <span style="color: #616161; font-weight: bold;">CPU</span>
+                    </div>
+                    <div class="ram-slots-container">
+                        <div class="ram-slot" id="slot-0" ondrop="dropRAM(event, 0)" ondragover="allowDrop(event)"></div>
+                        <div class="ram-slot" id="slot-1" ondrop="dropRAM(event, 1)" ondragover="allowDrop(event)"></div>
+                        <div class="ram-slot" id="slot-2" ondrop="dropRAM(event, 2)" ondragover="allowDrop(event)"></div>
+                        <div class="ram-slot" id="slot-3" ondrop="dropRAM(event, 3)" ondragover="allowDrop(event)"></div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 0.8rem; color: #90a4ae;">DDR4 Slots (1-3, 2-4 Dual Channel)</div>
+                </div>
+
+                <div class="parts-bin">
+                    <div class="draggable-ram" draggable="true" ondragstart="dragRAM(event, 'DDR4')">
+                        <div class="ram-stick-icon" style="background: linear-gradient(to bottom, #2e7d32, #1b5e20); border: 1px solid #4caf50;"></div>
+                        <span style="color: #4caf50; font-weight: bold;">DDR4 (正确)</span>
+                    </div>
+                    <div class="draggable-ram" draggable="true" ondragstart="dragRAM(event, 'DDR3')">
+                        <div class="ram-stick-icon" style="background: linear-gradient(to bottom, #1565c0, #0d47a1); border: 1px solid #42a5f5;"></div>
+                        <span style="color: #42a5f5;">DDR3 (旧款)</span>
+                    </div>
+                    <div class="draggable-ram" draggable="true" ondragstart="dragRAM(event, 'Laptop')">
+                        <div class="ram-stick-icon" style="height: 60px; background: #424242; border: 1px solid #757575;"></div>
+                        <span style="color: #bdbdbd;">笔记本内存</span>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button class="control-btn" onclick="resetInstallLab()">重置主板</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="parameter-control" data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 30px 0;">
+                <i class="fas fa-sliders-h"></i> 内存参数调整模拟器
+            </h2>
+            
+            <p style="text-align: center; font-size: 1.2rem; margin-bottom: 30px;">
+                调整下方参数，观察系统性能变化，理解内存参数的实际影响
+            </p>
+            
+            <div class="control-container">
+                <div class="controls">
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>内存容量</span>
+                            <span class="slider-value" id="capacity-value">16GB</span>
+                        </div>
+                        <input type="range" id="capacity-slider" min="2" max="64" value="16" step="2" 
+                               oninput="updateParameter('capacity', this.value); showInfoCard('capacity')">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.7;">
+                            <span>2GB</span>
+                            <span>64GB</span>
+                        </div>
+                    </div>
+                    
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>内存频率</span>
+                            <span class="slider-value" id="frequency-value">3200MHz</span>
+                        </div>
+                        <input type="range" id="frequency-slider" min="2133" max="6400" value="3200" step="100"
+                               oninput="updateParameter('frequency', this.value); showInfoCard('frequency')">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.7;">
+                            <span>2133MHz</span>
+                            <span>6400MHz</span>
+                        </div>
+                    </div>
+                    
+                    <div class="slider-group">
+                        <div class="slider-label">
+                            <span>延迟时序 (CL)</span>
+                            <span class="slider-value" id="latency-value">CL18</span>
+                        </div>
+                        <input type="range" id="latency-slider" min="14" max="30" value="18" step="1"
+                               oninput="updateParameter('latency', this.value); showInfoCard('latency')">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.7;">
+                            <span>CL14</span>
+                            <span>CL30</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 40px; text-align: center;">
+                        <button onclick="resetParameters()" style="background: var(--secondary); border: none; padding: 12px 25px; border-radius: 20px; color: white; font-weight: bold;">
+                            <i class="fas fa-redo"></i> 重置参数
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="performance-display">
+                    <div class="performance-metrics">
+                        <h3 style="text-align: center; color: var(--primary); margin-bottom: 25px; font-family: 'Orbitron', monospace;">
+                            <i class="fas fa-tachometer-alt"></i> 系统性能表现
+                        </h3>
+                        
+                        <div class="metric-bar-container">
+                            <div class="metric-label">
+                                <span>启动程序速度</span>
+                                <span id="app-speed-value">65%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-fill" id="app-speed-bar"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-bar-container">
+                            <div class="metric-label">
+                                <span>多任务切换流畅度</span>
+                                <span id="multitask-value">70%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-fill" id="multitask-bar"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-bar-container">
+                            <div class="metric-label">
+                                <span>数据处理效率</span>
+                                <span id="data-processing-value">60%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-fill" id="data-processing-bar"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="chart-container">
+                            <canvas id="performance-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 40px 0;">
+                <i class="fas fa-chart-bar"></i> 关键性能参数
+            </h2>
+            
+            <div class="performance-grid">
+                <div class="perf-card" data-aos="flip-left" data-aos-delay="100">
+                    <span class="perf-value" id="capacity">16GB</span>
+                    <h3>容量大小</h3>
+                    <p>可同时处理的数据量</p>
+                </div>
+                
+                <div class="perf-card" data-aos="flip-left" data-aos-delay="200">
+                    <span class="perf-value" id="speed">3200</span>
+                    <h3>传输速度 (MT/s)</h3>
+                    <p>每秒传输的百万次周期</p>
+                </div>
+                
+                <div class="perf-card" data-aos="flip-left" data-aos-delay="300">
+                    <span class="perf-value" id="latency">CL16</span>
+                    <h3>时序延迟</h3>
+                    <p>响应时间越短越好</p>
+                </div>
+                
+                <div class="perf-card" data-aos="flip-left" data-aos-delay="400">
+                    <span class="perf-value" id="power">1.2V</span>
+                    <h3>工作电压</h3>
+                    <p>功耗越低越节能</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="ddr-comparison" data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 40px 0;">
+                <i class="fas fa-sync-alt"></i> DDR4 vs DDR5 对比
+            </h2>
+            
+            <div class="ddr-pairs">
+                <div class="ddr-card ddr4" data-aos="fade-right">
+                    <h3 style="color: #00ff88; font-family: 'Orbitron', monospace;">
+                        <i class="fas fa-memory"></i> DDR4
+                    </h3>
+                    <p>最大容量: 128GB</p>
+                    <p>频率范围: 1600-3200MT/s</p>
+                    <p>电压: 1.2V</p>
+                    <p>发布年份: 2014</p>
+                    <img src="https://kkimgs.yisou.com/ims?kt=url&at=smstruct&key=aHR0cDovL3AzLml0Yy5jbi9pbWFnZXMwMS8yMDIwMTEwNy8wYTNiNWM4ZmI4OTk0MjMyYjRhMTY3ODcwMDhiODdlMS5qcGVn&sign=yx:y2lXC-FGUStCDx6sawHt-KH0ObA=&tv=400_400" alt="DDR4内存条正面展示" class="responsive-img" style="margin: 20px 0;">
+                </div>
+                
+                <div style="text-align: center; font-size: 2rem;">
+                    <i class="fas fa-arrow-right"></i>
+                    <br>
+                    <span style="color: var(--primary);">技术演进</span>
+                </div>
+                
+                <div class="ddr-card ddr5" data-aos="fade-left">
+                    <h3 style="color: #ff6b35; font-family: 'Orbitron', monospace;">
+                        <i class="fas fa-memory"></i> DDR5
+                    </h3>
+                    <p>最大容量: 256GB</p>
+                    <p>频率范围: 3200-8400MT/s</p>
+                    <p>电压: 1.1V</p>
+                    <p>发布年份: 2020</p>
+                    <img src="https://kkimgs.yisou.com/ims?kt=url&at=smstruct&key=aHR0cDovL3A3Lml0Yy5jbi9xXzcwL2ltYWdlczAzLzIwMjIxMTExLzliYjdiNDFlOTE1NzRkMDBiZDJmOTY0MTU0OWZlNWQzLmpwZWc=&sign=yx:Xx_GA-kAJQ9hW0bzKzfI_tZxm6I=&tv=400_400" alt="DDR5内存条正面展示" class="responsive-img" style="margin: 20px 0;">
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <button onclick="highlightDDR('ddr4')" style="background: #00ff88; border: none; padding: 12px 25px; border-radius: 20px; color: #000; font-weight: bold; margin: 5px;">
+                    突出显示 DDR4
+                </button>
+                <button onclick="highlightDDR('ddr5')" style="background: #ff6b35; border: none; padding: 12px 25px; border-radius: 20px; color: white; font-weight: bold; margin: 5px;">
+                    突出显示 DDR5
+                </button>
+                <button onclick="resetDDR()" style="background: var(--secondary); border: none; padding: 12px 25px; border-radius: 20px; color: white; font-weight: bold; margin: 5px;">
+                    重置
+                </button>
+            </div>
+        </section>
+
+        <section data-aos="fade-up">
+            <h2 style="text-align: center; font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin: 40px 0;">
+                <i class="fas fa-route"></i> 内存工作流程
+            </h2>
+            
+            <img src="https://kkimgs.yisou.com/ims?kt=url&at=smstruct&key=aHR0cHM6Ly9ib29rYmsuaW1nLnpoYW5neXVlMDEuY29tL2dyb3VwNjIvaE4vdFkvYzA1ZjIwODFkYTQ1NzBmZTY0NjJiZTczOTE1ZDgwMTEuanBnP3Y9MmQxWVJUaGomdD1md0FBQVdkbzJQdy4=&sign=yx:vnDch0rSPdUA25t2VORkVWsASWE=&tv=400_400" alt="CPU与内存交互工作流程图展示数据传输过程" class="responsive-img" data-aos="zoom-in">
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; margin: 40px 0;">
+                <div class="detail-card" data-aos="flip-up" data-aos-delay="100">
+                    <i class="fas fa-microprocessor"></i>
+                    <h3>CPU发出请求</h3>
+                    <p>处理器需要读取或写入数据</p>
+                </div>
+                
+                <div class="detail-card" data-aos="flip-up" data-aos-delay="200">
+                    <i class="fas fa-network-wired"></i>
+                    <h3>地址总线传输</h3>
+                    <p>指定内存地址，精确定位</p>
+                </div>
+                
+                <div class="detail-card" data-aos="flip-up" data-aos-delay="300">
+                    <i class="fas fa-exchange-alt"></i>
+                    <h3>数据交换</h3>
+                    <p>在内存和CPU之间快速传输</p>
+                </div>
+            </div>
+        </section>
+
+        <footer style="text-align: center; padding: 60px 20px; background: rgba(0, 255, 136, 0.05); border-radius: 20px; margin-top: 60px;" data-aos="fade-up">
+            <h2 style="font-family: 'Orbitron', monospace; font-size: 2.5rem; color: var(--primary); margin-bottom: 20px;">
+                <i class="fas fa-rocket"></i> 总结
+            </h2>
+            <p style="font-size: 1.2rem; opacity: 0.9; max-width: 800px; margin: 0 auto;">
+                内存作为计算机的核心组件，就像大脑的短期记忆系统。它决定了我们能同时处理多少任务，
+                每个数据的读写速度，以及整个系统的流畅度。通过今天的探索，我们不仅看到了内存的
+                外观，更深入到了它的内部结构，理解了数据是如何在微观世界中被存储和传输的。
+            </p>
+            <div style="margin-top: 30px;">
+                <button onclick="showFunFact()" style="background: linear-gradient(45deg, var(--primary), var(--secondary)); border: none; padding: 15px 30px; border-radius: 25px; color: white; font-weight: bold; font-size: 1.1rem; cursor: pointer; margin: 10px;">
+                    <i class="fas fa-gift"></i> 随机趣味事实
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+        // 初始化AOS动画
+        AOS.init({ duration: 1000, once: true });
+
+        /* =========================================
+           Part 1: DRAM 微观模拟 (核心新增功能)
+           ========================================= */
+        let dramCharge = 0; // 0-100
+        const liquidEl = document.getElementById('dram-liquid');
+        const voltageEl = document.getElementById('dram-voltage');
+        const bitEl = document.getElementById('dram-bit');
+        const statusEl = document.getElementById('dram-status');
+
+        // 充电功能
+        function chargeDRAM() {
+            dramCharge = 100;
+            updateDRAMVisuals();
+            // 点击时的视觉反馈
+            liquidEl.style.filter = "brightness(1.5)";
+            setTimeout(() => liquidEl.style.filter = "brightness(1)", 150);
+        }
+
+        // 漏电循环 (模拟物理特性)
+        setInterval(() => {
+            if (dramCharge > 0) {
+                // 电荷越高漏得越快 (模拟电容放电曲线)
+                const leakRate = 0.8 + (dramCharge / 100) * 1.5;
+                dramCharge -= leakRate;
+                if (dramCharge < 0) dramCharge = 0;
+                updateDRAMVisuals();
+            }
+        }, 100);
+
+        function updateDRAMVisuals() {
+            // 1. 更新液面高度
+            liquidEl.style.height = `${dramCharge}%`;
+            
+            // 2. 更新电压文字 (假设满电 1.2V)
+            const voltage = (dramCharge / 100 * 1.2).toFixed(2);
+            voltageEl.innerText = `${voltage}V`;
+
+            // 3. 更新颜色和状态 (阈值设为 50%)
+            if (dramCharge > 50) {
+                // 状态 1
+                liquidEl.style.background = "linear-gradient(0deg, var(--primary) 0%, var(--secondary) 100%)";
+                bitEl.innerText = "1";
+                bitEl.style.color = "var(--primary)";
+                bitEl.style.borderColor = "var(--primary)";
+                statusEl.innerText = "数据有效 (Data Valid)";
+                statusEl.style.color = "var(--primary)";
+            } else if (dramCharge > 0) {
+                // 临界区 (危险)
+                liquidEl.style.background = "linear-gradient(0deg, #ff9900 0%, #ff3366 100%)";
+                bitEl.innerText = "0"; // 电压不足，判定为0
+                bitEl.style.color = "#ff9900";
+                bitEl.style.borderColor = "#ff9900";
+                statusEl.innerText = "⚠️ 电荷不足，判定为 0";
+                statusEl.style.color = "#ff9900";
+            } else {
+                // 完全没电
+                bitEl.innerText = "0";
+                bitEl.style.color = "#444";
+                bitEl.style.borderColor = "#444";
+                statusEl.innerText = "无数据 (Empty)";
+                statusEl.style.color = "#666";
+            }
+        }
+
+        /* =========================================
+           Three.js 3D 内存模型逻辑 (替换了原有的 CSS 3D 逻辑)
+           ========================================= */
+        let scene, camera, renderer, memoryStick, chipsGroup, particles;
+        let isDataFlowing = false;
+        let isDDR5 = false;
+        let isPaused = false;
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            
+            // 场景设置
+            scene = new THREE.Scene();
+            // 注意：不设置 scene.background，让 renderer alpha: true 透出网页背景
+            
+            // 摄像机
+            camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 1000);
+            camera.position.set(0, 6, 12);
+            camera.lookAt(0, 0, 0);
+
+            // 渲染器 (开启透明)
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(container.offsetWidth, container.offsetHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 灯光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // 增强环境光
+            scene.add(ambientLight);
+            
+            const dirLight = new THREE.DirectionalLight(0x00ff88, 0.8); // 主光带点绿色
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            const backLight = new THREE.PointLight(0x4dabf7, 0.8); // 蓝色背光
+            backLight.position.set(-5, 5, -5);
+            scene.add(backLight);
+
+            // 创建模型
+            createMemoryModel();
+
+            // 动画循环
+            animate();
+
+            // 自适应窗口
+            window.addEventListener('resize', () => {
+                const width = container.offsetWidth;
+                const height = container.offsetHeight;
+                renderer.setSize(width, height);
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+            });
+        }
+
+        function createMemoryModel() {
+            memoryStick = new THREE.Group();
+
+            // PCB 板 (深绿色带反光)
+            const pcbGeometry = new THREE.BoxGeometry(10, 0.15, 2.8);
+            const pcbMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x051a10, 
+                specular: 0x111111, 
+                shininess: 100 
+            });
+            const pcb = new THREE.Mesh(pcbGeometry, pcbMaterial);
+            memoryStick.add(pcb);
+
+            // 金手指 (底部黄色触点)
+            const goldFingerGeo = new THREE.BoxGeometry(9.8, 0.05, 0.2);
+            const goldMat = new THREE.MeshPhongMaterial({ 
+                color: 0xffd700, 
+                shininess: 200, 
+                emissive: 0xaa6600, 
+                emissiveIntensity: 0.2 
+            });
+            const goldFinger = new THREE.Mesh(goldFingerGeo, goldMat);
+            goldFinger.position.set(0, 0, 1.45);
+            memoryStick.add(goldFinger);
+
+            // 内存颗粒 (黑色芯片)
+            chipsGroup = new THREE.Group();
+            const chipGeo = new THREE.BoxGeometry(1, 0.25, 1);
+            const chipMat = new THREE.MeshPhongMaterial({ 
+                color: 0x111111, 
+                specular: 0x333333,
+                shininess: 80 
+            });
+
+            for(let i = 0; i < 8; i++) {
+                const chip = new THREE.Mesh(chipGeo, chipMat);
+                // 简单的排列逻辑
+                chip.position.set(-3.5 + i * 1.0, 0.2, -0.2); 
+                chipsGroup.add(chip);
+            }
+            memoryStick.add(chipsGroup);
+            
+            // PMIC (DDR5 专属电源芯片，初始隐藏)
+            const pmicGeo = new THREE.BoxGeometry(0.8, 0.3, 0.8);
+            const pmicMat = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 100 });
+            const pmic = new THREE.Mesh(pmicGeo, pmicMat);
+            pmic.position.set(0, 0.2, 0.8); // 放在下方中间
+            pmic.name = 'pmic';
+            pmic.visible = false;
+            memoryStick.add(pmic);
+
+            // 初始角度
+            memoryStick.rotation.x = -0.5;
+            scene.add(memoryStick);
+
+            // 创建数据粒子
+            createParticles();
+        }
+
+        function createParticles() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            
+            for (let i = 0; i < 100; i++) {
+                const x = (Math.random() - 0.5) * 9;
+                const y = 0.5; 
+                const z = (Math.random() - 0.5) * 2;
+                vertices.push(x, y, z);
+            }
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            // 粒子材质使用原网页的主色调 neon green
+            const material = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.1 });
+            particles = new THREE.Points(geometry, material);
+            particles.visible = false;
+            memoryStick.add(particles);
+        }
+
+        // 交互功能：数据流开关
+        function toggleDataFlow() {
+            isDataFlowing = !isDataFlowing;
+            particles.visible = isDataFlowing;
+        }
+
+        // 交互功能：DDR 切换
+        function toggleDDR() {
+            isDDR5 = !isDDR5;
+            const label = document.getElementById('model-label');
+            const pmic = memoryStick.getObjectByName('pmic');
+            
+            if (isDDR5) {
+                label.innerText = "DDR5 内存条 (集成 PMIC 芯片)";
+                label.style.color = "var(--accent)";
+                if(pmic) pmic.visible = true;
+                // 模拟缺口位置变化
+                memoryStick.children[1].position.x = 0.5; 
+            } else {
+                label.innerText = "标准 DDR4 内存条";
+                label.style.color = "var(--primary)";
+                if(pmic) pmic.visible = false;
+                memoryStick.children[1].position.x = 0; 
+            }
+        }
+
+        // 交互功能：旋转暂停/开始
+        function toggleRotation3D() {
+            isPaused = !isPaused;
+            const icon = document.getElementById('icon-pause');
+            icon.className = isPaused ? 'fas fa-play' : 'fas fa-pause';
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isPaused && memoryStick) {
+                memoryStick.rotation.y += 0.005;
+            }
+
+            // 粒子动画
+            if (isDataFlowing && particles) {
+                const positions = particles.geometry.attributes.position.array;
+                for(let i = 0; i < positions.length; i += 3) {
+                    positions[i+2] += 0.15; // 向 Z 轴移动
+                    // 循环重置
+                    if(positions[i+2] > 1.4) {
+                        positions[i+2] = -1.4;
+                        positions[i] = (Math.random() - 0.5) * 9;
+                    }
+                }
+                particles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // 启动 3D 场景
+        window.addEventListener('load', () => {
+            init3D(); // 替换原有的 createMemoryCells 等
+            createMemoryCells(); // 保留原有的网格生成
+            initPerformanceCounters();
+            initChart();
+            updatePerformanceMetrics(16, 3200, 18);
+        });
+
+        /* =========================================
+           原有的其他辅助 JS 函数 (保持不变)
+           ========================================= */
+
+        // 生成内存单元 (方格阵列)
+        function createMemoryCells() {
+            const container = document.querySelector('.memory-cells');
+            if(!container) return;
+            const cells = [];
+            
+            for (let i = 0; i < 256; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.index = i;
+                cell.onclick = () => toggleCell(cell);
+                cells.push(cell);
+                container.appendChild(cell);
+            }
+            
+            setTimeout(() => {
+                for (let i = 0; i < 16; i++) {
+                    cells[Math.floor(Math.random() * 256)].classList.add('on');
+                }
+            }, 1000);
+        }
+
+        function toggleCell(cell) {
+            cell.classList.toggle('on');
+            const isOn = cell.classList.contains('on');
+            cell.textContent = isOn ? '1' : '';
+            cell.style.background = isOn ? '#00ff88' : '';
+            cell.style.color = isOn ? '#000' : '';
+        }
+
+        // DDR高亮
+        function highlightDDR(type) {
+            const ddr4 = document.querySelector('.ddr4');
+            const ddr5 = document.querySelector('.ddr5');
+            
+            if (type === 'ddr4') {
+                ddr4.style.transform = 'scale(1.05)';
+                ddr4.style.boxShadow = '0 0 30px #00ff88';
+                ddr5.style.transform = 'scale(1)';
+                ddr5.style.boxShadow = 'none';
+            } else {
+                ddr5.style.transform = 'scale(1.05)';
+                ddr5.style.boxShadow = '0 0 30px #ff6b35';
+                ddr4.style.transform = 'scale(1)';
+                ddr4.style.boxShadow = 'none';
+            }
+        }
+
+        function resetDDR() {
+            const ddr4 = document.querySelector('.ddr4');
+            const ddr5 = document.querySelector('.ddr5');
+            ddr4.style.transform = 'scale(1)';
+            ddr4.style.boxShadow = 'none';
+            ddr5.style.transform = 'scale(1)';
+            ddr5.style.boxShadow = 'none';
+        }
+
+        // 数字动画
+        function animateValue(element, start, end, duration, suffix = '') {
+            const startTimestamp = performance.now();
+            const step = (timestamp) => {
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                const currentValue = Math.floor(progress * (end - start) + start);
+                element.textContent = currentValue + suffix;
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        // 初始化数字动画
+        function initPerformanceCounters() {
+            setTimeout(() => {
+                animateValue(document.getElementById('capacity'), 0, 16, 2000, 'GB');
+                animateValue(document.getElementById('speed'), 0, 3200, 2500);
+                animateValue(document.getElementById('latency'), 0, 16, 1500, 'CL');
+                animateValue(document.getElementById('power'), 0, 1.2, 2000);
+            }, 1000);
+        }
+
+        // 趣味事实
+        const funFacts = [
+            "你知道吗？现代内存的访问速度比人类眨眼快100万倍！",
+            "如果把内存中的一个比特比作一个沙粒，16GB内存就是一座小沙丘！",
+            "内存条上的金手指其实不是纯金的，但确实含有微量黄金！",
+            "DDR5内存的传输速度可以达到每秒8400MT/s，比音速还快！",
+            "内存芯片中的晶体管比蚂蚁还要小1000倍！",
+            "1970年代的第一代内存条容量只有1KB，现在进步了1600万倍！"
+        ];
+
+        function showFunFact() {
+            const randomFact = funFacts[Math.floor(Math.random() * funFacts.length)];
+            alert('💡 ' + randomFact);
+        }
+
+        // 参数调整功能
+        let performanceChart;
+        let previousConfig = { capacity: 16, frequency: 3200, latency: 18 };
+        let chartData = {
+            labels: ['当前配置', '上一配置', '基础配置'],
+            datasets: [{
+                label: '综合性能',
+                data: [70, 70, 50],
+                backgroundColor: ['rgba(0, 255, 136, 0.7)', 'rgba(77, 171, 247, 0.7)', 'rgba(255, 107, 53, 0.5)'],
+                borderColor: ['rgba(0, 255, 136, 1)', 'rgba(77, 171, 247, 1)', 'rgba(255, 107, 53, 1)'],
+                borderWidth: 1
+            }]
+        };
+
+        function initChart() {
+            const ctx = document.getElementById('performance-chart').getContext('2d');
+            performanceChart = new Chart(ctx, {
+                type: 'bar',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: 'rgba(255, 255, 255, 0.7)' } },
+                        x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: 'rgba(255, 255, 255, 0.7)' } }
+                    },
+                    plugins: { legend: { labels: { color: 'rgba(255, 255, 255, 0.7)' } } }
+                }
+            });
+        }
+
+        function calculatePerformance(capacity, frequency, latency) {
+            const capacityScore = (capacity / 64) * 30;
+            const frequencyScore = (frequency / 6400) * 40;
+            const latencyScore = (1 - (latency - 14) / (30 - 14)) * 30;
+            return Math.round(capacityScore + frequencyScore + latencyScore);
+        }
+
+        function updatePerformanceMetrics(capacity, frequency, latency) {
+            const appSpeed = Math.round(60 + (capacity - 16) * 0.5 + (frequency - 3200) * 0.01 - (latency - 18) * 0.8);
+            const multitask = Math.round(65 + (capacity - 16) * 1.2 + (frequency - 3200) * 0.005 - (latency - 18) * 0.5);
+            const dataProcessing = Math.round(55 + (capacity - 16) * 0.3 + (frequency - 3200) * 0.015 - (latency - 18) * 1.0);
+            const clamp = (val) => Math.max(0, Math.min(100, val));
+            
+            document.getElementById('app-speed-bar').style.width = `${clamp(appSpeed)}%`;
+            document.getElementById('multitask-bar').style.width = `${clamp(multitask)}%`;
+            document.getElementById('data-processing-bar').style.width = `${clamp(dataProcessing)}%`;
+            
+            document.getElementById('app-speed-value').textContent = `${clamp(appSpeed)}%`;
+            document.getElementById('multitask-value').textContent = `${clamp(multitask)}%`;
+            document.getElementById('data-processing-value').textContent = `${clamp(dataProcessing)}%`;
+            
+            const currentScore = calculatePerformance(capacity, frequency, latency);
+            const previousScore = calculatePerformance(previousConfig.capacity, previousConfig.frequency, previousConfig.latency);
+            
+            chartData.datasets[0].data = [currentScore, previousScore, 50];
+            performanceChart.update();
+            previousConfig = { capacity, frequency, latency };
+        }
+
+        function updateParameter(type, value) {
+            const capacity = parseInt(document.getElementById('capacity-slider').value);
+            const frequency = parseInt(document.getElementById('frequency-slider').value);
+            const latency = parseInt(document.getElementById('latency-slider').value);
+            if (type === 'capacity') document.getElementById('capacity-value').textContent = `${value}GB`;
+            else if (type === 'frequency') document.getElementById('frequency-value').textContent = `${value}MHz`;
+            else if (type === 'latency') document.getElementById('latency-value').textContent = `CL${value}`;
+            updatePerformanceMetrics(capacity, frequency, latency);
+        }
+
+        function resetParameters() {
+            document.getElementById('capacity-slider').value = 16;
+            document.getElementById('frequency-slider').value = 3200;
+            document.getElementById('latency-slider').value = 18;
+            document.getElementById('capacity-value').textContent = '16GB';
+            document.getElementById('frequency-value').textContent = '3200MHz';
+            document.getElementById('latency-value').textContent = 'CL18';
+            updatePerformanceMetrics(16, 3200, 18);
+        }
+
+        function showInfoCard(type) {
+            const existingCard = document.querySelector('.info-card');
+            if (existingCard) existingCard.remove();
+            const card = document.createElement('div');
+            card.className = 'info-card';
+            
+            if (type === 'capacity') {
+                card.innerHTML = `<h4>内存容量</h4><p>决定了可以同时运行的程序数量和处理大型文件的能力。</p>`;
+                card.style.top = '100px'; card.style.left = '20px';
+            } else if (type === 'frequency') {
+                card.innerHTML = `<h4>内存频率</h4><p>以MHz为单位，代表内存的运行速度。频率越高传输越快。</p>`;
+                card.style.top = '220px'; card.style.left = '20px';
+            } else if (type === 'latency') {
+                card.innerHTML = `<h4>延迟时序 (CL)</h4><p>表示内存响应CPU请求所需的时间。数值越小延迟越低。</p>`;
+                card.style.top = '340px'; card.style.left = '20px';
+            }
+            document.querySelector('.parameter-control').appendChild(card);
+            setTimeout(() => { if (document.contains(card)) { card.style.opacity = '0'; setTimeout(() => card.remove(), 300); } }, 5000);
+        }
+
+        /* =========================================
+           Part 2: Concept Awareness (Robot Demo)
+           ========================================= */
+        let robotState = 'idle';
+        let bookLocation = 'shelf'; // shelf, robot, desk
+
+        function startConceptDemo(type) {
+            const robot = document.getElementById('robot-actor');
+            const targetBook = document.getElementById('target-book');
+            const robotBook = document.getElementById('robot-book');
+            const deskBook = document.getElementById('desk-book');
+            const message = document.getElementById('concept-message');
+
+            if (type === 'slow') {
+                if (robotState !== 'idle' && robotState !== 'finished') return;
+                
+                // Step 1: Fetch
+                message.innerText = "指令：去硬盘（仓库）找书...";
+                message.style.color = "#ffeb3b";
+                robotState = 'fetching';
+                robot.className = 'robot-actor fetching';
+                
+                setTimeout(() => {
+                    // Step 2: Pick up
+                    targetBook.style.opacity = '0';
+                    robotBook.style.display = 'block';
+                    message.innerText = "找到了！正在搬回内存（书桌）...";
+                    
+                    // Step 3: Return
+                    robotState = 'returning';
+                    robot.className = 'robot-actor returning';
+                    
+                    setTimeout(() => {
+                        // Step 4: Place on desk
+                        robotBook.style.display = 'none';
+                        deskBook.style.display = 'block';
+                        bookLocation = 'desk';
+                        
+                        message.innerText = "开始阅读！(CPU处理数据)";
+                        message.style.color = "#00ff88";
+                        robotState = 'reading';
+                        robot.className = 'robot-actor reading';
+                        
+                        // Simulate reading
+                        setTimeout(() => {
+                            robotState = 'finished';
+                            message.innerText = "任务完成。书现在就在书桌上。";
+                        }, 2000);
+                    }, 2000);
+                }, 2000);
+
+            } else if (type === 'fast') {
+                if (bookLocation !== 'desk') {
+                    message.innerText = "错误：书还没在书桌上呢！先执行上面的‘查找’任务。";
+                    message.style.color = "#ff5252";
+                    return;
+                }
+                
+                message.innerText = "书已经在书桌上了，直接读！(速度极快)";
+                message.style.color = "#00ff88";
+                robotState = 'fast-reading';
+                robot.className = 'robot-actor fast-reading';
+                
+                setTimeout(() => {
+                    robotState = 'finished';
+                    robot.className = 'robot-actor reading'; // Back to normal reading pose
+                    message.innerText = "瞬间完成！这就是内存存在的意义。";
+                }, 500);
+            }
+        }
+
+        /* =========================================
+           Part 3: Hardware Anatomy (Exploded View)
+           ========================================= */
+        const anatomyParts = {
+            heatsink: { name: '散热马甲', desc: '给高速运转的芯片降温，通常还带有RGB灯光。', offset: -80 },
+            chips: { name: '存储颗粒', desc: '真正存数据的地方，就像一个个小仓库。', offset: -30 },
+            pcb: { name: 'PCB电路板', desc: '承载所有元件的基板，绿色的或黑色的。', offset: 0 },
+            fingers: { name: '金手指', desc: '负责和主板传输信号的‘高速公路接口’，容易氧化。', offset: 40 }
+        };
+
+        function updateExplode(val) {
+            document.getElementById('explode-value').innerText = val + '%';
+            const ratio = val / 100;
+            
+            document.getElementById('layer-heatsink').style.transform = `translateY(${anatomyParts.heatsink.offset * ratio}px) translateZ(${50 * ratio}px) rotateX(10deg)`;
+            document.getElementById('layer-chips').style.transform = `translateY(${anatomyParts.chips.offset * ratio}px) translateZ(${20 * ratio}px) rotateX(10deg)`;
+            document.getElementById('layer-fingers').style.transform = `translateY(${anatomyParts.fingers.offset * ratio}px) translateZ(${-20 * ratio}px) rotateX(10deg)`;
+            // PCB stays mostly put but rotates
+            document.getElementById('layer-pcb').style.transform = `rotateX(10deg)`;
+        }
+
+        function showAnatomyInfo(partId) {
+            const info = anatomyParts[partId];
+            alert(`【${info.name}】\n${info.desc}`);
+        }
+
+        /* =========================================
+           Part 4: Simulation Bench (Installation)
+           ========================================= */
+        let installedSlots = [null, null, null, null];
+
+        function dragRAM(ev, type) {
+            ev.dataTransfer.setData("type", type);
+        }
+
+        function allowDrop(ev) {
+            ev.preventDefault();
+        }
+
+        function dropRAM(ev, index) {
+            ev.preventDefault();
+            const type = ev.dataTransfer.getData("type");
+            const feedback = document.getElementById('install-feedback');
+            
+            if (type !== 'DDR4') {
+                feedback.innerText = "❌ 错误！类型不匹配。主板是 DDR4 接口，插不进去别硬来！（看防呆口）";
+                feedback.style.background = "rgba(211, 47, 47, 0.8)";
+                return;
+            }
+
+            if (installedSlots[index]) {
+                feedback.innerText = "⚠️ 该插槽已经有内存条了！";
+                feedback.style.background = "rgba(255, 160, 0, 0.8)";
+                return;
+            }
+
+            // Install
+            installedSlots[index] = 'DDR4';
+            const slotEl = document.getElementById(`slot-${index}`);
+            slotEl.classList.add('filled');
+            slotEl.innerHTML = '<div style="width: 80%; height: 90%; background: linear-gradient(to bottom, #2e7d32, #1b5e20); border-radius: 2px;"></div>';
+            
+            checkInstallSuccess();
+        }
+
+        function checkInstallSuccess() {
+            const feedback = document.getElementById('install-feedback');
+            const count = installedSlots.filter(s => s === 'DDR4').length;
+            const isDual = (installedSlots[0] && installedSlots[2]) || (installedSlots[1] && installedSlots[3]);
+
+            if (count === 1) {
+                feedback.innerText = "✅ 安装了一根。再插一根来激活双通道吧！";
+                feedback.style.background = "rgba(25, 118, 210, 0.8)";
+            } else if (count === 2) {
+                if (isDual) {
+                    feedback.innerText = "🎉 恭喜！双通道已激活 (插槽 1-3 或 2-4)，性能 Double！";
+                    feedback.style.background = "rgba(56, 142, 60, 0.8)";
+                } else {
+                    feedback.innerText = "⚠️ 安装成功，但这只是单通道模式（挨着插）。为了性能，请试试隔一个插槽？";
+                    feedback.style.background = "rgba(255, 160, 0, 0.8)";
+                }
+            } else if (count > 2) {
+                feedback.innerText = "💪 哇，土豪！插满四根性能更强！";
+                feedback.style.background = "rgba(56, 142, 60, 0.8)";
+            }
+        }
+
+        function resetInstallLab() {
+            installedSlots = [null, null, null, null];
+            for(let i=0; i<4; i++) {
+                const slot = document.getElementById(`slot-${i}`);
+                slot.classList.remove('filled');
+                slot.innerHTML = '';
+            }
+            const feedback = document.getElementById('install-feedback');
+            feedback.innerText = "任务：请为这台电脑安装双通道内存（2根 DDR4）。";
+            feedback.style.background = "rgba(0,0,0,0.5)";
+        }
+    </script>
+</body>
+</html>
